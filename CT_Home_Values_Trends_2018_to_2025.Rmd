@@ -1,0 +1,400 @@
+---
+title: "Connecticut Home Value Trends: 2018–2025 Analysis"
+author: "Ryan Mannix"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+  
+---
+
+```{r setup, include=FALSE}
+# Load necessary libraries and suppress warnings/messages
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(scales)
+library(gt)
+library(ggtext)
+```
+
+## Introduction 
+
+This report analyzes Connecticut county-level home values for single-family homes and condos, comparing pre-, during-, and post-COVID periods (2018–2025). Data is from Zillow's ZHVI dataset.
+
+Data Source: https://www.zillow.com/research/data
+
+Note: This data was downloaded on June 27, 2025, so average 2025 home values reflect figures up to that date.
+
+## 📁 Load and Filter Data
+
+```{r load-data}
+# Read in the Zillow Home Value Index (ZHVI) datasets for Single Family and Condo homes
+sfr_frame <- read.csv("County_zhvi_uc_sfr_tier_0.33_0.67_sm_sa_month.csv") 
+condo_frame <- read.csv("County_zhvi_uc_condo_tier_0.33_0.67_sm_sa_month.csv")
+
+# Filter data to only include Connecticut counties
+sfr_frame <- sfr_frame %>% filter(State == "CT")
+condo_frame <- condo_frame %>% filter(State == "CT")
+```
+
+## 📊 Calculate Yearly Averages
+
+```{r annual-averages}
+# Create new columns for each year by averaging monthly values
+# Use [[ ]] to dynamically assign to columns named "2018", "2019", ..., "2025"
+years <- 2018:2025
+
+for(year in years) {
+  sfr_frame[[as.character(year)]] <- rowMeans(select(sfr_frame, contains(paste0("X", year))))
+  condo_frame[[as.character(year)]] <- rowMeans(select(condo_frame, contains(paste0("X", year)))) 
+}
+
+# Keep only relevant columns for analysis
+sfr_frame <- sfr_frame %>% select(State, RegionName, MunicipalCodeFIPS, all_of(as.character(years)))
+condo_frame <- condo_frame %>% select(State, RegionName, MunicipalCodeFIPS, all_of(as.character(years)))
+```
+
+## 📈 Trend Over Time – Single-Family Residences
+
+```{r sfr-trends-plot}
+# Convert data to long format for plotting
+sfr_frame_long <- sfr_frame %>% 
+  pivot_longer(cols = contains("20"), names_to = "Year", values_to = "Average_Home_Values") %>%
+  mutate(Year = factor(Year,levels = as.character(2018:2025))) %>% # Factored to preserve correct order in plot
+  arrange(RegionName, Year) 
+
+# Trend over time plot
+ggplot( sfr_frame_long, aes(x=Year, y=Average_Home_Values, colour = RegionName, group = RegionName)) +
+         geom_line() + 
+         geom_point() +
+         labs(title = "Connecticut Single-Family Home Values: Pre, During and Post-COVID", x= "Year", y = "Avg. Single Family Home Value ($)", colour= "County") +
+         scale_y_continuous(labels = label_comma()) + # Format Y axis with commas - Not Scientific Notation
+         geom_vline(xintercept = which(levels(sfr_frame_long$Year) %in% c("2020", "2023")), linetype= "dashed", colour= "gray40") + # Mark start/end of COVID period
+         annotate("text", x=1.5, y=Inf, label= "Pre-COVID", vjust= 1.5, size = 4) + 
+         annotate("text", x=4.5, y=Inf, label= "During COVID", vjust= 1.5, size = 4) +
+         annotate("text", x=7.25, y=Inf, label= "Post-COVID", vjust= 1.5, size = 4) +
+         theme(plot.title = element_text(hjust = 0.5, size = 14))
+
+```
+
+
+**Single-Family Trends Plot**  
+* **Fairfield County** stands out, with 2025 average home values almost $300,000 higher than any other county in Connecticut.  
+* Home values rose steadily across all counties from **2020 to 2025**.  
+
+
+## 📋 Table – Percent Increase in Single-Family Values
+
+```{r sfr-percent-increase-table}
+# Calculate percent increase from 2018 to 2025 for SFR
+Home_Value_Percent_Increase_Table <- sfr_frame %>%
+  mutate(Delta_Price = `2025` - `2018`,
+         Percent_Increase = round(((`2025` - `2018`) / `2018`) * 100)) %>%
+  select(RegionName,`2018`, `2025`, Delta_Price, Percent_Increase) %>%
+  arrange(-Percent_Increase) #Sort by highest increase
+
+# Display the result in a formulated table using gt
+Home_Value_Percent_Increase_Table %>%
+  gt() %>%
+  cols_align(align = "center", columns = everything()) %>%
+  cols_label(
+    `2018` = md("**2018 Avg. Home Price ($)**"),
+    `2025` = md("**2025 Avg. Home Price ($)**"),
+    Delta_Price = md("**Price Increase ($)**"),
+    RegionName = md("**County**"),
+    Percent_Increase = md("**Percent Increase (%)**")
+  ) %>%
+  tab_header(title = md("**Percent Increase in Average Single-Family Home Prices (2018-2025)**")) %>%
+  tab_style(
+    style = cell_borders(sides = "all", color = "black", weight = px(1.5)),
+    locations=cells_body()
+  )
+
+
+```
+
+
+**Single-Family Percent Increase Table**  
+* **Litchfield & Windham** county led with a **71% increase**, followed by **New Haven** at **69%**.  
+* Every county gained over **$150,000** in average home value between **2018 and 2025**. 
+
+
+
+## 📊 Bar Chart – Single-Family Home Value Increase
+
+
+```{r sfr-bar-chart}
+# Long format for chart
+sfr_long <- Home_Value_Percent_Increase_Table %>%
+  pivot_longer(cols = c(`2018`, `2025`), names_to = "Year", values_to = "Average_Home_Values") %>%
+  mutate(
+    Bar_Chart_Format_Col = case_when(
+      Year == "2025" ~ paste0("$", round(Average_Home_Values), " <br> ", "(", Percent_Increase, "%)"),
+      Year == "2018" ~ paste0("$", round(Average_Home_Values))
+    )
+  )
+
+# Bar chart
+ggplot(sfr_long, aes(x= reorder(RegionName,-Percent_Increase), y=Average_Home_Values, fill = Year)) + 
+  geom_col(position = position_dodge(width = 0.9)) + 
+  labs(title = "Change in Single Family Home Values by County (2018 to 2025)",
+    x= "County",
+    y= "Home Value ($)",
+    caption = "Note: 2025 bars show dollar value and percent increase (in parentheses)") +
+  scale_y_continuous(labels = label_comma(), expand = expansion(mult = c(0, 0.2))) + #expanded y axis to include labels
+  scale_fill_manual(values = c("2018" = "#552448", "2025"= "#eae3d4")) +
+  ggtext::geom_richtext(
+    aes(label = Bar_Chart_Format_Col, group = Year),
+    position = position_dodge(width = 0.9), vjust= 0, size = 3,
+    fill = NA, label.color = NA
+  ) + 
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle=45, hjust= 1),
+    plot.title = element_text(hjust = 0.5) # center plot title
+  )
+```
+
+
+**Single-Family Bar Chart**  
+* *All counties showed growth above 50%*, indicating broad-based appreciation.  
+* **Fairfield County** average home values in 2025 have increased the most since 2018 with an **increase of $262,000**.
+
+
+## 📈 Trend Over Time – Condos
+
+```{r condo-trends-plot}
+# Convert data to long format for plotting
+condo_frame_long <- condo_frame %>% 
+  pivot_longer(cols = contains("20"), names_to = "Year", values_to = "Average_Home_Values") %>%
+  mutate(Year = factor(Year,levels = as.character(2018:2025))) %>% # Factored to preserve correct order in plot
+  arrange(RegionName, Year)
+
+# Trend over time plot
+ggplot( condo_frame_long, aes(x=Year, y=Average_Home_Values, colour = RegionName, group = RegionName)) +
+         geom_line() + 
+         geom_point() +
+         labs(title = "Connecticut Condo Values: Pre, During and Post-COVID", x= "Year", y = "Avg. Condo Value ($)", colour= "County") +
+         scale_y_continuous(labels = label_comma()) + # Format Y axis with commas - not scientific notation
+         geom_vline(xintercept = which(levels(sfr_frame_long$Year) %in% c("2020", "2023")), linetype= "dashed", colour= "gray40") + # Mark start/end of COVID period
+         annotate("text", x=1.5, y=Inf, label= "Pre-COVID", vjust= 1.5, size = 4) + 
+         annotate("text", x=4.5, y=Inf, label= "During COVID", vjust= 1.5, size = 4) +
+         annotate("text", x=7.25, y=Inf, label= "Post-COVID", vjust= 1.5, size = 4) +
+         theme(plot.title = element_text(hjust = 0.5, size = 16))
+```
+
+
+**Condo Trends Plot**  
+* Again **Fairfield County** stands out, with 2025 average condo values over **$130,000 higher** than any other county in Connecticut.  
+* Average condo values rose sharply from **2020 to 2025**.  
+   
+
+## 📋 Table – Condo Price Increase
+
+```{r condo--percent-increase-table}
+# Calculate percent increase from 2018 to 2025 for condos
+Condo_Value_Percent_Increase_Table <- condo_frame %>%
+  mutate(Delta_Price = `2025` - `2018`,
+         Percent_Increase = round(((`2025` - `2018`) / `2018`) * 100)) %>%
+  select(RegionName,`2018`, `2025`, Delta_Price, Percent_Increase) %>%
+  arrange(-Percent_Increase) #Sort by highest increase
+
+# Display the result in a formulated table using gt
+  gt(Condo_Value_Percent_Increase_Table) %>%
+  cols_align(align = "center", columns = everything()) %>%
+  cols_label(
+    `2018` = md("**2018 Avg. Condo Price ($)**"),
+    `2025` = md("**2025 Avg. Condo Price ($)**"),
+    Delta_Price = md("**Price Increase ($)**"),
+    RegionName = md("**County**"),
+    Percent_Increase = md("**Percent Increase (%)**")
+  ) %>%
+  tab_header(title = md("**Condo Value Increase (2018-2025)**")) %>%
+  tab_style(
+    style = cell_borders(sides = "all", color = "black", weight = px(1.5)),
+    locations=cells_body()
+  )
+
+```
+
+
+
+**Condo Value Increase Table**    
+* **Litchfield County** saw the largest increase in condo values, up **95%** since 2018.    
+* **New Haven** followed closely with a **89% increase**.  
+* Most counties gained over **$100,000** in average condo value between 2018 and 2025. 
+
+
+## 📊 Bar Chart – Condo Price Increase
+
+```{r condo-bar-chart}
+# Long format for chart
+condo_long <- Condo_Value_Percent_Increase_Table %>%
+  pivot_longer(cols = c(`2018`, `2025`), names_to = "Year", values_to = "Average_Condo_Values") %>%
+  mutate(
+    Bar_Chart_Format_Col = case_when(
+      Year == "2025" ~ paste0("$", round(Average_Condo_Values), " <br> ", "(", Percent_Increase, "%)"),
+      Year == "2018" ~ paste0("$", round(Average_Condo_Values))
+    )
+  )
+
+#Bar chart
+ggplot(condo_long, aes(x= reorder(RegionName,-Percent_Increase), y=Average_Condo_Values, fill = Year)) + 
+  geom_col(position = position_dodge(width = 0.9)) + 
+  labs(
+    title = "Change in Condo Prices by County (2018 to 2025)",
+    x= "County",
+    y= "Condo Value ($)",
+    caption = "Note: 2025 bars show dollar value and percent increase (in parentheses)") +
+  scale_y_continuous(labels = label_comma(), expand = expansion(mult = c(0, 0.2))) + #expanded y axis to include labels
+  scale_fill_manual(values = c("2018" = "#6fa8dd", "2025"= "#cccccc")) +
+  ggtext::geom_richtext(
+    aes(label = Bar_Chart_Format_Col, group = Year),
+    position = position_dodge(width = 0.9), vjust= 0, size = 2.5,
+    fill = NA, label.color = NA
+  ) + 
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle=45, hjust= 1),
+    plot.title = element_text(hjust = 0.5) # center plot title
+  )
+```
+
+
+**Condo Bar Chart**    
+* **Fairfield** county average home values in 2025 have increased the most since 2018 with an increase of $134,000.   
+* *All counties showed growth above 50%*, indicating broad-based appreciation.  
+* Counties with lower 2018 prices (e.g., **Litchfield**, **New Haven**) saw the largest **percentage increases**. 
+
+
+## 🏠📈 Condo vs. Single-Family Home Value Growth Comparison
+
+```{r comparsion-sfr-condo}
+# Join sfr and condo tables
+condo_vs_sfr <- Home_Value_Percent_Increase_Table %>% 
+  left_join(Condo_Value_Percent_Increase_Table, by= "RegionName") %>% 
+  select(RegionName, Percent_Increase.x, Percent_Increase.y)
+
+# Rename columns
+condo_vs_sfr <- condo_vs_sfr %>%
+  rename(County = RegionName, SFR = Percent_Increase.x, Condo = Percent_Increase.y)
+
+# Long format for bar chart
+condo_vs_sfr_Percent_Increase_long <- condo_vs_sfr %>% pivot_longer(cols = contains(c("SFR","Condo")), names_to = "Home_Type", values_to = "Percent_Increase")
+
+# Comparison bar chart
+condo_vs_sfr_Percent_Increase_long %>% ggplot(aes(x= reorder(County,-Percent_Increase), y=Percent_Increase, fill = Home_Type)) + 
+  geom_col(position = position_dodge(width = 0.9)) + 
+  labs(title = "Condo vs. Single-Family: Price Increase (2018-2025)",
+       x= "County",
+       y= "Percent Increase (%)") +
+  scale_y_continuous(labels = label_comma()) +
+  scale_fill_manual(values = c("SFR" = "#eae3d4", "Condo" = "#cccccc")) +
+  ggtext::geom_richtext(
+    aes(label = paste0(Percent_Increase,"%"), group = Home_Type),
+    position = position_dodge(width = 0.9), vjust= 0, size = 3,
+    fill = NA, label.color = NA
+  ) + 
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle=45, hjust= 1),
+    plot.title = element_text(hjust = 0.5) # center plot title
+  )
+```
+
+
+**Condo vs. Single-Family Comparison Bar Chart**    
+* For most Connecticut counties, condos outpaced single-family homes in **percentage growth**.    
+* The largest growth gaps appeared in counties like **Litchfield** and **New Haven**,    
+  where condos outperformed single family residences (SFR) by **20+ percentage points**.  
+* This highlights **affordability-driven demand** and shifting buyer behavior post-COVID.
+
+
+## 📌 Summary Statistics (2018–2025)
+
+``` {r summary}
+# Summary statistics for Single-Family Residences
+sfr_summary <- Home_Value_Percent_Increase_Table %>%
+  summarise(
+    Mean_2018 = mean(`2018`),
+    Mean_2025 = mean(`2025`),
+    Avg_Percent_Increase = round(mean(Percent_Increase), 0),
+    Max_Percent_Increase = max(Percent_Increase),
+    Min_Percent_Increase = min(Percent_Increase)
+  )
+# Summary statistics for Condos
+condo_summary <- Condo_Value_Percent_Increase_Table %>%
+  summarise(
+    Mean_2018 = mean(`2018`),
+    Mean_2025 = mean(`2025`),
+    Avg_Percent_Increase = round(mean(Percent_Increase), 0),
+    Max_Percent_Increase = max(Percent_Increase),
+    Min_Percent_Increase = min(Percent_Increase)
+  )
+
+# Combine for comparison
+summary_stats <- bind_rows( # Binds sfr and condo summaries together and adds a column of Home_Type
+  sfr_summary %>% mutate(Home_Type = "Single-Family"),
+  condo_summary %>% mutate(Home_Type = "Condo")
+  ) %>%
+  select(Home_Type, everything()) %>% #selects to put Home_Type first
+  mutate(
+    Mean_2018 = dollar(Mean_2018),# adds $ in front
+    Mean_2025 = dollar(Mean_2025),
+    Avg_Percent_Increase = paste0(Avg_Percent_Increase, "%"), #adding % in back
+    Max_Percent_Increase = paste0(Max_Percent_Increase, "%"),
+    Min_Percent_Increase = paste0(Min_Percent_Increase, "%")
+  )
+  
+# Display as a table
+gt(summary_stats) %>%
+  cols_label(
+    Home_Type = "Home Type",
+    Mean_2018 = "Avg. Value (2018)",
+    Mean_2025 = "Avg. Value (2025)",
+    Avg_Percent_Increase = "Mean % Increase",
+    Max_Percent_Increase = "Max % Increase",
+    Min_Percent_Increase = "Min % Increase"
+    ) %>%
+  tab_header(
+    title = md("**Summary Statistics of Home Value Changes (2018–2025)**")
+  ) %>%
+  cols_align(align = "center", columns = everything()) %>%
+  tab_style(
+    style = cell_borders(sides = "all", color = "black", weight = px(1.5)),
+    locations=cells_body()
+  )
+
+```
+
+
+## 🧾 **Conclusion**
+
+Between 2018 and 2025, Connecticut’s housing market experienced strong appreciation across both single-family homes and condos, with **condos slightly outpacing single-family homes** in average percentage growth.
+
+---
+
+### 🏡 **Single-Family Residences**
+
+- Average value rose from **$277,415** to **$453,537**, a **65% increase** statewide.
+- Growth ranged from **54% to 71%**, showing relatively consistent appreciation across counties.
+- This trend suggests continued demand for suburban and rural living, likely accelerated by COVID-era preferences for more space and lower-density environments.
+
+---
+
+### 🏢 **Condominiums**
+
+- Average value increased from **$157,916** to **$272,991**, a **76% increase** overall.
+- Growth varied more widely—**51% to 95%**, depending on county.
+- Higher average growth may reflect rising condo appeal due to **affordability constraints**, **changing lifestyle needs**, and more **first-time buyers or downsizers** entering the market.
+
+---
+
+### 📌 **Final Insights**
+
+- Condos **outpaced single-family homes** in percent growth (**76% vs. 65%**), despite starting from a lower value base.
+- The **COVID period (2020–2023)** marked a clear inflection point for home value acceleration. 
+- Some counties saw **condo values nearly double**, with a max growth of **95%**.
+  
+These findings highlight a **resilient and evolving housing market** in Connecticut. For **investors, planners, and homeowners**, understanding these dynamics is essential for future real estate strategy and decision-making.
