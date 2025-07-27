@@ -1,1 +1,1 @@
-# Connecticut-Home-Values-Study-2018-to-2025
+# Connecticut-Home-Value-Trends-2018-to-2025
